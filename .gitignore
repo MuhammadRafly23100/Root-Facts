@@ -1,0 +1,8 @@
+node_modules/
+.claude/
+.DS_Store
+*.log
+.cache/
+dist/
+.netlify/
+.vscode/
