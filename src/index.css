@@ -672,16 +672,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
   color: #92400e;
 }
 
-.badge--ai {
-  background-color: #ede9fe;
-  color: #6d28d9;
-}
-
-[data-theme="dark"] .badge--ai {
-  background-color: #2e1065;
-  color: #c4b5fd;
-}
-
 [data-theme="dark"] .badge--offline {
   background-color: #422006;
   color: #fbbf24;

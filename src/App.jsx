@@ -29,8 +29,6 @@ function App() {
   const [backend, setBackend] = useState(null);
   const [liveFps, setLiveFps] = useState(0);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
-  const [aiProgress, setAiProgress] = useState(0); // progres unduhan model Generative AI
-  const [aiReady, setAiReady] = useState(false);
 
   const stopDetectionLoop = useCallback(() => {
     if (detectionLoopRef.current) {
@@ -50,28 +48,35 @@ function App() {
     async ({ detector, generator }, isCancelled = () => false) => {
       try {
         actions.setError(null);
-        // Model deteksi menggerbangi tombol scan.
+
+        // Tahap 1 — model deteksi (TensorFlow.js).
+        actions.setModelStatus('Memuat Model AI...');
         await detector.loadModel((p) => {
           if (!isCancelled()) actions.setModelStatus(`Memuat Model AI... ${p}%`);
         });
         if (isCancelled()) return;
         setBackend(detector.backend);
-        actions.setModelStatus(MODEL_READY);
 
-        // Model Generative AI dimuat di latar belakang (tidak memblokir deteksi).
-        // Promise-nya disimpan agar proses fun fact bisa menunggunya bila belum selesai.
-        aiLoadRef.current = generator
-          .loadModel((p) => {
-            if (!isCancelled()) setAiProgress(p);
-          })
-          .then((res) => {
-            if (!isCancelled()) setAiReady(true);
-            return res;
-          })
-          .catch((error) => {
-            logError('Model AI gagal dimuat', error);
-            return null;
-          });
+        // Tahap 2 — model Generative AI (Transformers.js).
+        // Status TETAP "Memuat Model AI..." selama pengunduhan berlangsung;
+        // "Model AI Siap" baru muncul setelah KEDUA model benar-benar siap.
+        actions.setModelStatus('Memuat Model AI...');
+        aiLoadRef.current = generator.loadModel((p) => {
+          if (!isCancelled()) actions.setModelStatus(`Memuat Model AI... ${p}%`);
+        });
+
+        try {
+          await aiLoadRef.current;
+          if (isCancelled()) return;
+        } catch (error) {
+          // Model generatif gagal — deteksi tetap dibolehkan berjalan
+          // agar aplikasi tidak sepenuhnya lumpuh.
+          logError('Model AI gagal dimuat', error);
+          aiLoadRef.current = null;
+        }
+
+        if (isCancelled()) return;
+        actions.setModelStatus(MODEL_READY);
       } catch (error) {
         if (isCancelled()) return;
         logError('Inisialisasi model gagal', error);
@@ -265,8 +270,6 @@ function App() {
         modelStatus={state.modelStatus}
         backend={backend}
         isOffline={isOffline}
-        aiProgress={aiProgress}
-        aiReady={aiReady}
         theme={theme}
         onCycleTheme={cycleTheme}
       />

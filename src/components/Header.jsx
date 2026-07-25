@@ -1,4 +1,4 @@
-import { Sprout, Sun, Moon, Monitor, Cpu, WifiOff, Sparkles } from 'lucide-react';
+import { Sprout, Sun, Moon, Monitor, Cpu, WifiOff } from 'lucide-react';
 
 const THEME_ICON = {
   light: Sun,
@@ -12,15 +12,7 @@ const THEME_LABEL = {
   system: 'Ikuti sistem',
 };
 
-function Header({
-  modelStatus,
-  backend,
-  isOffline,
-  aiProgress = 0,
-  aiReady = false,
-  theme = 'system',
-  onCycleTheme,
-}) {
+function Header({ modelStatus, backend, isOffline, theme = 'system', onCycleTheme }) {
   const isModelReady = modelStatus === 'Model AI Siap';
   const ThemeIcon = THEME_ICON[theme] || Monitor;
 
@@ -44,13 +36,6 @@ function Header({
             <span className="badge badge--backend" title="Backend TensorFlow.js">
               <Cpu size={12} />
               <span>{backend.toUpperCase()}</span>
-            </span>
-          )}
-
-          {!aiReady && (
-            <span className="badge badge--ai" title="Progres unduhan model Generative AI">
-              <Sparkles size={12} />
-              <span>AI {aiProgress}%</span>
             </span>
           )}
 
