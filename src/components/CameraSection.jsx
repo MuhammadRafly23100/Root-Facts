@@ -53,8 +53,14 @@ function CameraSection({
   };
 
   const isModelReady = modelStatus === 'Model AI Siap';
-  const buttonDisabled = !isModelReady;
-  const buttonText = isRunning ? 'Stop Scan' : 'Mulai Scan';
+  const isModelFailed = modelStatus === 'Model gagal dimuat';
+  // Saat model gagal, tombol tetap aktif dan berfungsi sebagai "coba lagi".
+  const buttonDisabled = !isModelReady && !isModelFailed;
+  const buttonText = isModelFailed
+    ? 'Coba muat ulang model'
+    : isRunning
+      ? 'Stop Scan'
+      : 'Mulai Scan';
 
   return (
     <section className="camera-section" aria-label="Camera Feed and Controls">

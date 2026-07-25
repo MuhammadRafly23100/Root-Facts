@@ -9,8 +9,10 @@ import { CameraService } from './services/CameraService';
 import { RootFactsService } from './services/RootFactsService';
 import { APP_CONFIG, isValidDetection } from './utils/config';
 import { createDelay, logError, getCameraErrorMessage } from './utils/common';
+import { requestPersistentStorage } from './utils/storage';
 
 const MODEL_READY = 'Model AI Siap';
+const MODEL_FAILED = 'Model gagal dimuat';
 // Cadence inferensi ~4x/detik (bukan tiap frame) demi performa & hemat baterai.
 const INFERENCE_INTERVAL = 250;
 
@@ -36,8 +38,49 @@ function App() {
       detectionLoopRef.current = null;
     }
     fpsSamplesRef.current = [];
-    setLiveFps(0);
+    // Angka FPS terakhir sengaja dipertahankan agar tetap terbaca setelah
+    // deteksi berhenti (di-reset ke 0 hanya saat kamera dimatikan).
   }, []);
+
+  /**
+   * Muat kedua model. Dipisah agar bisa dipanggil ulang saat pemuatan gagal
+   * (mis. di perangkat mobile yang cache-nya sempat terusir browser).
+   */
+  const loadModels = useCallback(
+    async ({ detector, generator }, isCancelled = () => false) => {
+      try {
+        actions.setError(null);
+        // Model deteksi menggerbangi tombol scan.
+        await detector.loadModel((p) => {
+          if (!isCancelled()) actions.setModelStatus(`Memuat Model AI... ${p}%`);
+        });
+        if (isCancelled()) return;
+        setBackend(detector.backend);
+        actions.setModelStatus(MODEL_READY);
+
+        // Model Generative AI dimuat di latar belakang (tidak memblokir deteksi).
+        // Promise-nya disimpan agar proses fun fact bisa menunggunya bila belum selesai.
+        aiLoadRef.current = generator
+          .loadModel((p) => {
+            if (!isCancelled()) setAiProgress(p);
+          })
+          .then((res) => {
+            if (!isCancelled()) setAiReady(true);
+            return res;
+          })
+          .catch((error) => {
+            logError('Model AI gagal dimuat', error);
+            return null;
+          });
+      } catch (error) {
+        if (isCancelled()) return;
+        logError('Inisialisasi model gagal', error);
+        actions.setModelStatus(MODEL_FAILED);
+        actions.setError('Model failed to load.');
+      }
+    },
+    [actions],
+  );
 
   // ---- [Basic] Inisialisasi layanan & muat model saat aplikasi dimuat ----
   useEffect(() => {
@@ -47,37 +90,11 @@ function App() {
     const generator = new RootFactsService();
     actions.setServices({ detector, camera, generator });
 
-    (async () => {
-      try {
-        // Model deteksi menggerbangi tombol scan.
-        await detector.loadModel((p) => {
-          if (!cancelled) actions.setModelStatus(`Memuat Model AI... ${p}%`);
-        });
-        if (cancelled) return;
-        setBackend(detector.backend);
-        actions.setModelStatus(MODEL_READY);
-
-        // Model Generative AI dimuat di latar belakang (tidak memblokir deteksi).
-        // Promise-nya disimpan agar proses fun fact bisa menunggunya bila belum selesai.
-        aiLoadRef.current = generator
-          .loadModel((p) => {
-            if (!cancelled) setAiProgress(p);
-          })
-          .then((res) => {
-            if (!cancelled) setAiReady(true);
-            return res;
-          })
-          .catch((error) => {
-            logError('Model AI gagal dimuat', error);
-            return null;
-          });
-      } catch (error) {
-        if (cancelled) return;
-        logError('Inisialisasi model gagal', error);
-        actions.setModelStatus('Model gagal dimuat');
-        actions.setError('Model failed to load.');
-      }
-    })();
+    // Minta penyimpanan persisten lebih dulu agar cache model tidak diusir
+    // browser saat kuota menipis (krusial untuk offline di perangkat mobile).
+    requestPersistentStorage().finally(() => {
+      if (!cancelled) loadModels({ detector, generator }, () => cancelled);
+    });
 
     // ---- [Basic] Bersihkan sumber daya saat komponen ditinggalkan ----
     return () => {
@@ -87,6 +104,14 @@ function App() {
       detector.dispose();
     };
   }, []);
+
+  // Coba muat ulang model setelah gagal (dipicu dari tombol scan).
+  const retryLoadModels = useCallback(() => {
+    const { detector, generator } = state.services;
+    if (!detector || !generator) return;
+    actions.setModelStatus('Memuat Model AI... 0%');
+    loadModels({ detector, generator });
+  }, [state.services, actions, loadModels]);
 
   // Pantau status online/offline untuk indikator PWA.
   useEffect(() => {
@@ -176,12 +201,19 @@ function App() {
 
   // ---- [Basic] Mulai / hentikan kamera ----
   const handleToggleCamera = useCallback(async () => {
-    const { camera } = state.services;
+    const { camera, detector } = state.services;
     if (!camera) return;
+
+    // Model gagal dimuat (mis. cache terusir di mobile) -> jadikan tombol sebagai retry.
+    if (detector && !detector.isLoaded()) {
+      retryLoadModels();
+      return;
+    }
 
     if (state.isRunning) {
       stopDetectionLoop();
       camera.stopCamera();
+      setLiveFps(0);
       actions.setRunning(false);
       actions.resetResults();
       return;
@@ -198,7 +230,14 @@ function App() {
       actions.setError(error.message || getCameraErrorMessage(error));
       actions.setRunning(false);
     }
-  }, [state.services, state.isRunning, actions, startDetectionLoop, stopDetectionLoop]);
+  }, [
+    state.services,
+    state.isRunning,
+    actions,
+    startDetectionLoop,
+    stopDetectionLoop,
+    retryLoadModels,
+  ]);
 
   // ---- [Advance] Ubah tone fakta ----
   const handleToneChange = useCallback(
