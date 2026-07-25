@@ -1,0 +1,40 @@
+# Konfigurasi Netlify untuk RootFacts (React + Vite, PWA).
+# File ini menimpa pengaturan di dashboard Netlify, sehingga deploy selalu konsisten.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Vite 6 butuh Node 18+; disamakan dengan versi pengembangan lokal.
+  NODE_VERSION = "22"
+
+# Single Page Application: semua rute diarahkan ke index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Service Worker harus selalu diambil versi terbaru, jangan di-cache browser,
+# agar update aplikasi langsung terdeteksi oleh pengguna.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# Aset ber-hash dari Vite aman di-cache selamanya (nama file berubah tiap build).
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Model TensorFlow.js (Teachable Machine) — jarang berubah, boleh di-cache lama.
+[[headers]]
+  for = "/model/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
