@@ -66,34 +66,66 @@ export class RootFactsService {
     return this.currentTone;
   }
 
-  // Bangun prompt Bahasa Inggris sesuai tone aktif.
+  /**
+   * Bangun prompt Bahasa Inggris sesuai tone aktif.
+   * Nama sayuran hasil klasifikasi disebut berulang dan diberi batasan eksplisit
+   * agar model tidak melantur ke sayuran lain.
+   */
   _buildPrompt(vegetableName) {
     const style = TONE_STYLES[this.currentTone] || TONE_STYLES.normal;
     return (
-      `Write one short and interesting fun fact about the vegetable named "${vegetableName}" ` +
-      `${style}. Use simple English and keep it under three sentences.`
+      `Give one interesting and accurate fun fact about ${vegetableName}. ` +
+      `The fact must be about ${vegetableName} only and must not mention any other vegetable. ` +
+      `Answer ${style}, in one or two short sentences of simple English.`
     );
+  }
+
+  // Ambil teks dari keluaran pipeline (bentuknya bisa array atau objek tunggal).
+  static _extractText(output) {
+    const text = Array.isArray(output) ? output[0]?.generated_text : output?.generated_text;
+    return (text || '').trim();
+  }
+
+  // Periksa apakah hasil benar-benar menyebut sayuran yang terdeteksi.
+  static _mentions(text, vegetableName) {
+    return text.toLowerCase().includes(vegetableName.toLowerCase());
   }
 
   // [Basic] Hasilkan fun fact. [Skilled] Parameter generasi. [Advance] Terapkan tone.
   async generateFacts(vegetableName) {
     if (!this.isReady()) throw new Error('Model AI belum siap');
 
+    const prompt = this._buildPrompt(vegetableName);
     this.isGenerating = true;
+
     try {
-      const output = await this.generator(this._buildPrompt(vegetableName), {
-        max_new_tokens: MAX_NEW_TOKENS,
-        temperature: 0.7,
-        top_p: 0.9,
-        do_sample: true,
-        repetition_penalty: 1.3,
-      });
+      // Sampling terkendali: temperature & top_p rendah agar keluaran tetap
+      // fokus pada konteks (nilai tinggi membuat teks acak dan menyimpang).
+      let text = RootFactsService._extractText(
+        await this.generator(prompt, {
+          max_new_tokens: MAX_NEW_TOKENS,
+          temperature: 0.3,
+          top_p: 0.7,
+          do_sample: true,
+          // Dijaga rendah: penalti tinggi ikut menghukum pengulangan nama
+          // sayuran itu sendiri, sehingga model malah membahas sayuran lain.
+          repetition_penalty: 1.05,
+        }),
+      );
 
-      const text = Array.isArray(output)
-        ? output[0]?.generated_text
-        : output?.generated_text;
+      // Bila hasil tidak menyebut sayuran yang terdeteksi, ulangi sekali dengan
+      // decoding deterministik (greedy) supaya jawaban tetap pada konteks.
+      if (!RootFactsService._mentions(text, vegetableName)) {
+        text = RootFactsService._extractText(
+          await this.generator(prompt, {
+            max_new_tokens: MAX_NEW_TOKENS,
+            do_sample: false,
+            repetition_penalty: 1.05,
+          }),
+        );
+      }
 
-      return (text || '').trim();
+      return text;
     } catch (error) {
       logError('Gagal menghasilkan fun fact', error);
       throw error;
